@@ -1,0 +1,110 @@
+# --- OS / macOS ---
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+._*
+.Spotlight-V100
+.Trashes
+
+# --- Editors / IDE ---
+.vscode/
+.idea/
+*.code-workspace
+
+# --- Node / Vite / TypeScript ---
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+# Lockfiles are typically committed; adjust if you prefer otherwise
+# package-lock.json
+# yarn.lock
+# pnpm-lock.yaml
+
+# Vite / bundlers
+.vite/
+dist/
+build/
+.cache/
+.eslintcache
+*.tsbuildinfo
+
+# Client-specific
+client/node_modules/
+client/dist/
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.pyd
+*.pyo
+.Python
+python*.cache
+
+# Packaging / build
+build/
+dist/
+.eggs/
+*.egg-info/
+*.egg
+wheels/
+share/python-wheels/
+MANIFEST
+
+# Virtual envs
+.venv/
+venv/
+env/
+ENV/
+
+# Py test/caches/type-checkers
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pyre/
+.dmypy.json
+.dmypy.json
+.hypothesis/
+
+# Coverage
+.coverage
+.coverage.*
+.coveragerc
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+htmlcov/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# --- Environment / Secrets ---
+.env
+.env.*
+!.env.example
+server/.env
+server/.env.*
+!server/env.example
+
+# --- Logs ---
+*.log
+logs/
+log/
+uvicorn.log
+
+# --- Certificates & Keys (avoid committing secrets) ---
+*.pem
+*.key
+*.crt
+*.p12
+*.der
+
+# --- Misc / Temp ---
+*.tmp
+*.temp
+.cache
