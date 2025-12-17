@@ -166,6 +166,33 @@ async def websocket_endpoint(websocket: WebSocket):
         await websocket.close()
 
 
+@app.get("/health")
+async def healthcheck():
+    required_envs = [
+        "EXOTEL_API_KEY",
+        "EXOTEL_API_TOKEN",
+        "EXOTEL_SID",
+        "EXOTEL_PHONE_NUMBER",
+    ]
+
+    missing = [env for env in required_envs if not os.getenv(env)]
+
+    if missing:
+        return JSONResponse(
+            status_code=500,
+            content={
+                "status": "error",
+                "missing_env_vars": missing,
+            },
+        )
+
+    return {
+        "status": "ok",
+        "service": "exotel-outbound-server",
+    }
+
+
+
 # ----------------- Main ----------------- #
 
 

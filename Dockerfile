@@ -1,29 +1,37 @@
-FROM dailyco/pipecat-base:latest
+# syntax=docker/dockerfile:1.7
 
-# Set working directory
+FROM python:3.11-slim
+
 WORKDIR /app
 
-# Environment variables for uv
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
     PYTHONUNBUFFERED=1
 
-# Install uv explicitly
+# System dependencies
+RUN apt-get update && apt-get install -y \
+    ffmpeg \
+    libsndfile1 \
+    curl \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install uv
 RUN pip install --no-cache-dir uv
 
-# Install dependencies using lockfile
+# Install Python deps
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=uv.lock,target=/app/uv.lock \
     --mount=type=bind,source=pyproject.toml,target=/app/pyproject.toml \
     uv sync --locked --no-install-project --no-dev
 
-# Copy application files
-COPY bot.py ./bot.py
-COPY server.py ./server.py
-COPY prompts.py ./prompts.py
+# App files
+COPY bot.py server.py prompts.py ./
 
-# Expose FastAPI / WS port
 EXPOSE 7860
 
-# Start server
+# Docker healthcheck (calls FastAPI /health)
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+  CMD curl -f http://localhost:7860/health || exit 1
+
 CMD ["uv", "run", "server.py"]
