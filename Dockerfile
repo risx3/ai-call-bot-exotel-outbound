@@ -29,9 +29,10 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 COPY bot.py server.py prompts.py ./
 
 EXPOSE 7860
+EXPOSE 7862
 
 # Docker healthcheck (calls FastAPI /health)
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
-  CMD curl -f http://localhost:7860/health || exit 1
+  CMD curl -f http://0.0.0.0:7862/health || exit 1
 
 CMD ["uv", "run", "server.py"]
