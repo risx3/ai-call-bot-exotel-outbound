@@ -12,6 +12,7 @@ and handle subsequent WebSocket connections for Media Streams.
 
 import os
 from contextlib import asynccontextmanager
+import multiprocessing
 
 import aiohttp
 import uvicorn
@@ -197,4 +198,12 @@ async def healthcheck():
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=7862)
+    # Get the number of workers from the environment variable or calculate based on CPU cores
+    workers = int(os.getenv("UVICORN_WORKERS", (2 * multiprocessing.cpu_count()) + 1))
+
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=7862,
+        workers=workers  # Specify the number of workers
+    )
