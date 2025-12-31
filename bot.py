@@ -1,4 +1,5 @@
 import os
+import asyncio
 from dotenv import load_dotenv
 from loguru import logger
 
@@ -90,6 +91,9 @@ async def bot(runner_args: RunnerArguments):
     llm = services["llm"]
     tts = services["tts"]
 
+    greeting_text = "नमस्ते! मैं Priya बोल रही हूँ OS Games से। क्या अभी बात करना convenient है?"
+    greeting_given = False
+    
     messages = [
         {
             "role": "system",
@@ -123,31 +127,39 @@ async def bot(runner_args: RunnerArguments):
     )
 
     # -------------------------------------------------------------------------
-    # GREETING (THIS ONE WILL SPEAK 🔊)
+    # GREETING (AFTER USER SPEAKS 🔊)
     # -------------------------------------------------------------------------
-    greeting_text = "नमस्ते! मैं Priya बोल रही हूँ OS Games से। क्या अभी बात करना convenient है?"
-    
     @task.event_handler("on_pipeline_started")
     async def on_pipeline_started(task, event):
-        logger.info("✅ Pipeline started — speaking greeting")
-        logger.info(f"🎤 Generating greeting: {greeting_text}")
+        """Wait for user input, then play greeting."""
+        nonlocal greeting_given
         
-        try:
-            # Generate audio from greeting text (tts.run_tts returns an async generator)
-            async for frame in tts.run_tts(text=greeting_text):
-                logger.info("✅ Greeting audio frame generated, pushing to transport")
-                # Push each audio frame to the transport output
-                await transport.output().push_frame(frame)
+        logger.info("✅ Pipeline started — waiting for user to speak")
+        
+        # Give the pipeline time to receive first user input
+        await asyncio.sleep(2)
+        
+        if not greeting_given:
+            logger.info("✅ Now speaking greeting after user input")
+            logger.info(f"🎤 Generating greeting: {greeting_text}")
             
-            # Add greeting to conversation context so LLM knows bot already greeted
-            context.add_message({
-                "role": "assistant",
-                "content": greeting_text
-            })
-            logger.info("✅ Greeting added to LLM context")
-            
-        except Exception as e:
-            logger.error(f"❌ Error generating greeting: {e}")
+            try:
+                # Generate audio from greeting text (tts.run_tts returns an async generator)
+                async for frame in tts.run_tts(text=greeting_text):
+                    logger.info("✅ Greeting audio frame generated, pushing to transport")
+                    # Push each audio frame to the transport output
+                    await transport.output().push_frame(frame)
+                
+                # Add greeting to conversation context so LLM knows bot already greeted
+                context.messages.append({
+                    "role": "assistant",
+                    "content": greeting_text
+                })
+                logger.info("✅ Greeting added to LLM context")
+                greeting_given = True
+                
+            except Exception as e:
+                logger.error(f"❌ Error generating greeting: {e}")
 
     runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
     await runner.run(task)
