@@ -63,13 +63,14 @@ _cached_services = _initialize_cached_services()
 # -----------------------------------------------------------------------------
 # BOT ENTRYPOINT
 # -----------------------------------------------------------------------------
-async def bot(runner_args: RunnerArguments):
+async def bot(runner_args: RunnerArguments,CALL_CONTEXT):
     transport_type, call_data = await parse_telephony_websocket(
         runner_args.websocket
     )
 
-    logger.info(f"🔌 Transport detected: {transport_type}")
 
+    logger.info(f"🔌 Transport detected: {transport_type}")
+    print("In bot ,",CALL_CONTEXT)
     serializer = ExotelFrameSerializer(
         stream_sid=call_data["stream_id"],
         call_sid=call_data["call_id"],
@@ -90,20 +91,56 @@ async def bot(runner_args: RunnerArguments):
     stt = services["stt"]
     llm = services["llm"]
     tts = services["tts"]
-
-    greeting_text = "नमस्ते! मैं Priya बोल रही हूँ OS Games से। क्या अभी बात करना convenient है?"
+    
+    greeting_text_dict = {
+    "hindi": "नमस्ते {client_name}! मैं Priya बोल रही हूँ {app_name} से। क्या अभी बात करना convenient है?",
+    "bengali": "নমস্কার {client_name}! আমি Priya বলছি {app_name} থেকে। এখন কথা বলা কি সুবিধাজনক?",
+    "telugu": "నమస్తే {client_name}! నేను {app_name} నుండి Priya మాట్లాడుతున్నాను. ఇప్పుడు మాట్లాడటం సౌకర్యంగా ఉందా?",
+    "marathi": "नमस्कार {client_name}! मी {app_name} मधून Priya बोलत आहे. सध्या बोलायला सोयीचे आहे का?",
+    "tamil": "வணக்கம் {client_name}! நான் {app_name} இலிருந்து Priya பேசுகிறேன். இப்போது பேசுவது வசதியா?",
+    "urdu": "نمستے {client_name}! میں {app_name} سے Priya بات کر رہی ہوں۔ کیا اس وقت بات کرنا مناسب ہے؟",
+    "gujarati": "નમસ્તે {client_name}! હું {app_name} તરફથી Priya બોલું છું. શું અત્યારે વાત કરવી અનુકૂળ છે?",
+    "kannada": "ನಮಸ್ಕಾರ {client_name}! ನಾನು {app_name} ನಿಂದ Priya ಮಾತನಾಡುತ್ತಿದ್ದೇನೆ. ಈಗ ಮಾತನಾಡಲು ಅನುಕೂಲವೇ?",
+    "odia": "ନମସ୍କାର {client_name}! ମୁଁ {app_name} ରୁ Priya କଥା ହେଉଛି। ଏହି ସମୟରେ କଥା ହେବା ସୁବିଧାଜନକ କି?",
+    "malayalam": "നമസ്കാരം {client_name}! ഞാൻ {app_name} നിന്നുള്ള Priya ആണ് സംസാരിക്കുന്നത്. ഇപ്പോൾ സംസാരിക്കാൻ സൗകര്യമുണ്ടോ?",
+    "punjabi": "ਸਤ ਸ੍ਰੀ ਅਕਾਲ {client_name}! ਮੈਂ {app_name} ਤੋਂ Priya ਗੱਲ ਕਰ ਰਹੀ ਹਾਂ। ਕੀ ਹੁਣ ਗੱਲ ਕਰਨਾ ਠੀਕ ਹੈ?",
+    "assamese": "নমস্কাৰ {client_name}! মই {app_name}ৰ পৰা Priya কথা কৈছোঁ। এতিয়া কথা পাতিবলৈ সুবিধা আছে নে?",
+    "maithili": "नमस्कार {client_name}! हम {app_name} सँ Priya बोल रहल छी। की एखन बात करनाइ सुविधाजनक अछि?",
+    "santali": "ᱱᱚᱢᱚᱥᱠᱟᱨ {client_name}! ᱤᱧ {app_name} ᱠᱷᱚᱱ Priya ᱠᱟᱛᱷᱟ ᱠᱚᱨ ᱮᱫᱟᱹᱧ। ᱱᱤᱛᱚᱜ ᱠᱟᱛᱷᱟ ᱠᱚᱨᱟᱭ ᱥᱩᱵᱤᱫᱷᱟ ᱢᱮᱱᱟ?",
+    "kashmiri": "नमस्कार {client_name}! मैं {app_name} से Priya बोल रही हूँ। क्या अभी बात करना मुनासिब है?",
+    "nepali": "नमस्ते {client_name}! म {app_name} बाट Priya बोल्दै छु। अहिले कुरा गर्न मिल्छ?",
+    "konkani": "नमस्कार {client_name}! हांव {app_name} कडल्यान Priya उलयता. आता बोलप सोयीचें आसा?",
+    "sindhi": "नमस्ते {client_name}! मैं {app_name} से Priya बात कर रही हूँ। क्या इस वक्त बात करना ठीक है?",
+    "dogri": "नमस्कार {client_name}! मैं {app_name} शा Priya बोलै दी आं। क्या हून गल्ल करना ठीक ऐ?",
+    "manipuri": "ꯍꯥꯏ {client_name}! ꯑꯩ {app_name} ꯗꯒꯤ Priya ꯃꯥꯏꯗꯨꯅꯥ ꯋꯥꯡꯂꯤ। ꯍꯧꯖꯤꯛ ꯋꯥꯡꯕ ꯃꯇꯧ ꯑꯣꯏꯔꯥ?",
+    "bodo": "नमस्कार {client_name}! आं {app_name} निफ्राय Priya बुंनो। दा बाथ्राय जोनाय जाबाय नामा?",
+    "sanskrit": "नमस्कारः {client_name}! अहं {app_name} तः Priya भाषे। किम् इदानीं संवादः सुविधाजनकः अस्ति?"
+}
+    lang = CALL_CONTEXT.get("language", "")
+    if lang not in greeting_text_dict.keys():
+        lang = "hindi"  # default to hindi if language not recognized
+    greeting_text = greeting_text_dict[lang].format(client_name=CALL_CONTEXT.get("client_name", ""),
+                                                    app_name=CALL_CONTEXT.get("app_name", ""))
     greeting_given = False
     
+    
+    system_prompt = base_system_prompt.format(
+        app_name=CALL_CONTEXT.get("app_name", ""),
+        reason=CALL_CONTEXT.get("reason", ""),
+        language=CALL_CONTEXT.get("language", ""),
+        client_name=CALL_CONTEXT.get("client_name", ""),
+                                                )
+    # print(system_prompt)
     messages = [
         {
             "role": "system",
-            "content": base_system_prompt,
+            "content": system_prompt,
         }
     ]
 
     context = LLMContext(messages)
     context_aggregator = LLMContextAggregatorPair(context)
-
+    print(context_aggregator)
     pipeline = Pipeline(
         [
             transport.input(),
@@ -131,13 +168,14 @@ async def bot(runner_args: RunnerArguments):
     # -------------------------------------------------------------------------
     @task.event_handler("on_pipeline_started")
     async def on_pipeline_started(task, event):
+        print("on_pipeline_started called")
         """Wait for user input, then play greeting."""
         nonlocal greeting_given
         
         logger.info("✅ Pipeline started — waiting for user to speak")
         
         # Give the pipeline time to receive first user input
-        await asyncio.sleep(2)
+        # await asyncio.sleep(1)÷]
         
         if not greeting_given:
             logger.info("✅ Now speaking greeting after user input")
@@ -161,5 +199,14 @@ async def bot(runner_args: RunnerArguments):
             except Exception as e:
                 logger.error(f"❌ Error generating greeting: {e}")
 
+    # -------------------------------------------------------------------------
+    # PIPELINE ENDED - PRINT ALL CONVERSATION MESSAGES
+    # -------------------------------------------------------------------------
+    
+
     runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
-    await runner.run(task)
+    
+    try:
+        await runner.run(task)
+    finally:
+        pass
