@@ -32,20 +32,14 @@ from prompts import base_system_prompt
 load_dotenv(override=True)
 
 # -----------------------------------------------------------------------------
-# GLOBAL SERVICE CACHE
+# SERVICE INITIALIZATION
 # -----------------------------------------------------------------------------
-_cached_services = None
 
+def _create_services():
+    """Create fresh service instances for each call."""
+    logger.info("🚀 Creating fresh AI services for this call")
 
-def _initialize_cached_services():
-    global _cached_services
-
-    if _cached_services is not None:
-        return _cached_services
-
-    logger.info("🚀 Initializing AI services (once)")
-
-    _cached_services = {
+    services = {
         "stt": OpenAISTTService(api_key=os.getenv("OPENAI_API_KEY")),
         "llm": OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY")),
         "tts": ElevenLabsTTSService(
@@ -54,23 +48,42 @@ def _initialize_cached_services():
         ),
     }
 
-    logger.info("✅ AI services cached")
-    return _cached_services
-
-
-_cached_services = _initialize_cached_services()
+    logger.info("✅ Fresh AI services created")
+    return services
 
 # -----------------------------------------------------------------------------
 # BOT ENTRYPOINT
 # -----------------------------------------------------------------------------
-async def bot(runner_args: RunnerArguments,CALL_CONTEXT):
+async def bot(runner_args: RunnerArguments, call_contexts_dict: dict = None):
+    """
+    Main bot function for handling incoming calls.
+    
+    Args:
+        runner_args: WebSocket runner arguments
+        call_contexts_dict: Dictionary of all call contexts keyed by call_sid
+    """
+    if call_contexts_dict is None:
+        call_contexts_dict = {}
+    
     transport_type, call_data = await parse_telephony_websocket(
         runner_args.websocket
     )
 
-
     logger.info(f"🔌 Transport detected: {transport_type}")
-    print("In bot ,",CALL_CONTEXT)
+    
+    call_id = call_data.get("call_id")
+    print(f"Call ID: {call_id}")
+    
+    # Look up call context from the contexts dictionary using call_id
+    call_context = {}
+    if call_id and call_id in call_contexts_dict:
+        call_context = call_contexts_dict[call_id]
+        logger.info(f"✅ Found call context for call_id {call_id}")
+        print(f"Call context retrieved: {call_context}")
+    else:
+        logger.warning(f"⚠️  No stored context found for call_id {call_id}, using defaults")
+        print(f"Available contexts: {list(call_contexts_dict.keys())}")
+
     serializer = ExotelFrameSerializer(
         stream_sid=call_data["stream_id"],
         call_sid=call_data["call_id"],
@@ -87,7 +100,8 @@ async def bot(runner_args: RunnerArguments,CALL_CONTEXT):
         ),
     )
 
-    services = _cached_services
+    # Create fresh service instances for this specific call
+    services = _create_services()
     stt = services["stt"]
     llm = services["llm"]
     tts = services["tts"]
@@ -116,19 +130,19 @@ async def bot(runner_args: RunnerArguments,CALL_CONTEXT):
     "bodo": "नमस्कार {client_name}! आं {app_name} निफ्राय Priya बुंनो। दा बाथ्राय जोनाय जाबाय नामा?",
     "sanskrit": "नमस्कारः {client_name}! अहं {app_name} तः Priya भाषे। किम् इदानीं संवादः सुविधाजनकः अस्ति?"
 }
-    lang = CALL_CONTEXT.get("language", "")
+    lang = call_context.get("language", "")
     if lang not in greeting_text_dict.keys():
         lang = "hindi"  # default to hindi if language not recognized
-    greeting_text = greeting_text_dict[lang].format(client_name=CALL_CONTEXT.get("client_name", ""),
-                                                    app_name=CALL_CONTEXT.get("app_name", ""))
+    greeting_text = greeting_text_dict[lang].format(client_name=call_context.get("client_name", ""),
+                                                    app_name=call_context.get("app_name", ""))
     greeting_given = False
     
     
     system_prompt = base_system_prompt.format(
-        app_name=CALL_CONTEXT.get("app_name", ""),
-        reason=CALL_CONTEXT.get("reason", ""),
-        language=CALL_CONTEXT.get("language", ""),
-        client_name=CALL_CONTEXT.get("client_name", ""),
+        app_name=call_context.get("app_name", ""),
+        reason=call_context.get("reason", ""),
+        language=call_context.get("language", ""),
+        client_name=call_context.get("client_name", ""),
                                                 )
     # print(system_prompt)
     messages = [
@@ -199,9 +213,6 @@ async def bot(runner_args: RunnerArguments,CALL_CONTEXT):
             except Exception as e:
                 logger.error(f"❌ Error generating greeting: {e}")
 
-    # -------------------------------------------------------------------------
-    # PIPELINE ENDED - PRINT ALL CONVERSATION MESSAGES
-    # -------------------------------------------------------------------------
     
 
     runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)

@@ -261,8 +261,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Store call context per call (using call_sid as key)
+_call_contexts = {}
+
 # ----------------- API ----------------- #
-CALL_CONTEXT = {}
 
 @app.post("/start")
 async def initiate_outbound_call(request: Request) -> JSONResponse:
@@ -270,19 +272,12 @@ async def initiate_outbound_call(request: Request) -> JSONResponse:
     
     data = await request.json()
     settings = data.get("dialout_settings", {})
-    # settings = payload.dialout_settings
-
 
     phone_number = settings.get("phone_number")
     app_name = settings.get("app_name")
     reason = settings.get("reason")
     language = settings.get("language")
     client_name = settings.get("client_name")
-    CALL_CONTEXT["phone_number"]=phone_number
-    CALL_CONTEXT["app_name"]=app_name
-    CALL_CONTEXT["reason"]=reason
-    CALL_CONTEXT["language"]=language
-    CALL_CONTEXT["client_name"]=client_name
 
     if not phone_number:
         raise HTTPException(
@@ -296,12 +291,22 @@ async def initiate_outbound_call(request: Request) -> JSONResponse:
             customer_number=str(phone_number),
         )
         
-        # Save call_sid to database asynchronously in the background
-        call_status = result.get("status")
+        # Store call context for this specific call using call_sid as key
         call_sid = result.get("call_sid")
+        call_status = result.get("status")
+        
         if call_sid and call_sid != "unknown":
-            # Fire and forget - don't await, returns immediately
-            asyncio.create_task(save_call_to_database(call_sid,call_status))
+            # Store context keyed by call_sid for later retrieval in WebSocket
+            _call_contexts[call_sid] = {
+                "phone_number": phone_number,
+                "app_name": app_name,
+                "reason": reason,
+                "language": language,
+                "client_name": client_name,
+                "call_sid": call_sid,
+            }
+            # Save call_sid to database asynchronously in the background
+            asyncio.create_task(save_call_to_database(call_sid, call_status))
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -311,6 +316,12 @@ async def initiate_outbound_call(request: Request) -> JSONResponse:
             "status": result["status"],
             "call_sid": result["call_sid"],
             "phone_number": phone_number,
+            "call_context": {
+                "app_name": app_name,
+                "reason": reason,
+                "language": language,
+                "client_name": client_name,
+            }
         }
     )
 
@@ -323,11 +334,13 @@ async def websocket_endpoint(websocket: WebSocket):
     try:
         from bot import bot
         from pipecat.runner.types import WebSocketRunnerArguments
-
+        from pipecat.runner.utils import parse_telephony_websocket
+        
         runner_args = WebSocketRunnerArguments(websocket=websocket)
         runner_args.handle_sigint = False
 
-        await bot(runner_args,CALL_CONTEXT)
+        # Pass the entire contexts dictionary to bot for lookup
+        await bot(runner_args, _call_contexts)
 
     except Exception as e:
         print(f"WebSocket error: {e}")
