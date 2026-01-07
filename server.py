@@ -3,6 +3,8 @@ import multiprocessing
 from contextlib import asynccontextmanager
 import asyncio
 import xml.etree.ElementTree as ET
+import pickle
+from pathlib import Path
 
 import aiohttp
 import psycopg2
@@ -14,6 +16,57 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 load_dotenv(override=True)
+
+# Create a directory for call context pkl files
+CALL_CONTEXTS_DIR = Path("./call_contexts")
+CALL_CONTEXTS_DIR.mkdir(exist_ok=True)
+
+# Store call context per call (using call_sid as key)
+_call_contexts = {}
+
+# Helper function to save call context to pickle file
+def save_call_context_pkl(call_sid: str, context: dict) -> bool:
+    """Save call context to a pickle file."""
+    try:
+        pkl_path = CALL_CONTEXTS_DIR / f"{call_sid}.pkl"
+        with open(pkl_path, 'wb') as f:
+            pickle.dump(context, f)
+        print(f"✅ Saved call context for {call_sid} to {pkl_path}")
+        return True
+    except Exception as e:
+        print(f"❌ Failed to save call context pickle: {e}")
+        return False
+
+def load_call_context_pkl(call_sid: str) -> dict:
+    """Load call context from pickle file."""
+    try:
+        pkl_path = CALL_CONTEXTS_DIR / f"{call_sid}.pkl"
+        if pkl_path.exists():
+            with open(pkl_path, 'rb') as f:
+                context = pickle.load(f)
+            print(f"✅ Loaded call context for {call_sid} from {pkl_path}")
+            return context
+        else:
+            print(f"⚠️  Pickle file not found for {call_sid}")
+            return {}
+    except Exception as e:
+        print(f"❌ Failed to load call context pickle: {e}")
+        return {}
+
+def delete_call_context_pkl(call_sid: str) -> bool:
+    """Delete call context pickle file."""
+    try:
+        pkl_path = CALL_CONTEXTS_DIR / f"{call_sid}.pkl"
+        if pkl_path.exists():
+            pkl_path.unlink()
+            print(f"✅ Deleted call context pickle for {call_sid}")
+            return True
+        else:
+            print(f"⚠️  Pickle file not found for deletion: {call_sid}")
+            return False
+    except Exception as e:
+        print(f"❌ Failed to delete call context pickle: {e}")
+        return False
 
 # ----------------- DATABASE HELPERS ----------------- #
 
@@ -296,8 +349,8 @@ async def initiate_outbound_call(request: Request) -> JSONResponse:
         call_status = result.get("status")
         
         if call_sid and call_sid != "unknown":
-            # Store context keyed by call_sid for later retrieval in WebSocket
-            _call_contexts[call_sid] = {
+            # Create the context dictionary
+            call_context = {
                 "phone_number": phone_number,
                 "app_name": app_name,
                 "reason": reason,
@@ -305,6 +358,14 @@ async def initiate_outbound_call(request: Request) -> JSONResponse:
                 "client_name": client_name,
                 "call_sid": call_sid,
             }
+            
+            # Store context keyed by call_sid for later retrieval in WebSocket
+            _call_contexts[call_sid] = call_context
+            
+            # Save to pickle file for multi-worker support
+            save_call_context_pkl(call_sid, call_context)
+            print(f"📦 Stored call context for {call_sid} in both memory and pickle")
+            
             # Save call_sid to database asynchronously in the background
             asyncio.create_task(save_call_to_database(call_sid, call_status))
         
@@ -431,8 +492,6 @@ async def call_analysis(sid: str) -> JSONResponse:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-
 
 
 # ----------------- MAIN ----------------- #

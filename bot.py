@@ -1,5 +1,7 @@
 import os
 import asyncio
+import pickle
+from pathlib import Path
 from dotenv import load_dotenv
 from loguru import logger
 
@@ -25,6 +27,42 @@ from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
 
 from prompts import base_system_prompt
+
+# Call contexts directory (same as in server.py)
+CALL_CONTEXTS_DIR = Path("./call_contexts")
+CALL_CONTEXTS_DIR.mkdir(exist_ok=True)
+
+# Helper function to load call context from pickle file
+def load_call_context_pkl(call_sid: str) -> dict:
+    """Load call context from pickle file."""
+    try:
+        pkl_path = CALL_CONTEXTS_DIR / f"{call_sid}.pkl"
+        if pkl_path.exists():
+            with open(pkl_path, 'rb') as f:
+                context = pickle.load(f)
+            logger.info(f"✅ Loaded call context for {call_sid} from {pkl_path}")
+            return context
+        else:
+            logger.warning(f"⚠️  Pickle file not found for {call_sid}")
+            return {}
+    except Exception as e:
+        logger.error(f"❌ Failed to load call context pickle: {e}")
+        return {}
+
+def delete_call_context_pkl(call_sid: str) -> bool:
+    """Delete call context pickle file."""
+    try:
+        pkl_path = CALL_CONTEXTS_DIR / f"{call_sid}.pkl"
+        if pkl_path.exists():
+            pkl_path.unlink()
+            logger.info(f"✅ Deleted call context pickle for {call_sid}")
+            return True
+        else:
+            logger.warning(f"⚠️  Pickle file not found for deletion: {call_sid}")
+            return False
+    except Exception as e:
+        logger.error(f"❌ Failed to delete call context pickle: {e}")
+        return False
 
 # -----------------------------------------------------------------------------
 # ENV
@@ -72,17 +110,24 @@ async def bot(runner_args: RunnerArguments, call_contexts_dict: dict = None):
     logger.info(f"🔌 Transport detected: {transport_type}")
     
     call_id = call_data.get("call_id")
-    print(f"Call ID: {call_id}")
+    print(f"Call ID #########################>>>>: {call_id}")
     
-    # Look up call context from the contexts dictionary using call_id
-    call_context = {}
-    if call_id and call_id in call_contexts_dict:
+    # Try to load call context from pickle file first (for multi-worker support)
+    call_context = load_call_context_pkl(call_id)
+    print("pklllllll",call_context)
+    delete_call_context_pkl(call_id)  # Clean up after loading
+    
+    # Fallback to in-memory dict if pickle not found
+    if not call_context and call_id and call_id in call_contexts_dict:
         call_context = call_contexts_dict[call_id]
-        logger.info(f"✅ Found call context for call_id {call_id}")
-        print(f"Call context retrieved: {call_context}")
+        logger.info(f"✅ Found call context in memory for call_id {call_id}")
+        print(f"Call context retrieved from memory: {call_context}")
+    elif call_context:
+        logger.info(f"✅ Found call context for call_id {call_id} from pickle file")
+        print(f"Call context retrieved from pickle: {call_context}")
     else:
         logger.warning(f"⚠️  No stored context found for call_id {call_id}, using defaults")
-        print(f"Available contexts: {list(call_contexts_dict.keys())}")
+        print(f"Available contexts in memory: {list(call_contexts_dict.keys())}")
 
     serializer = ExotelFrameSerializer(
         stream_sid=call_data["stream_id"],
