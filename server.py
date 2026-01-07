@@ -432,6 +432,6 @@ if __name__ == "__main__":
         "server:app",
         host="0.0.0.0",
         port=7862,
-        workers=2  # Specify the number of workers
+        workers=workers  # Specify the number of workers
     )
 
