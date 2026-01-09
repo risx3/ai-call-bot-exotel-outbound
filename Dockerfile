@@ -26,7 +26,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-install-project --no-dev
 
 # App files
-COPY bot.py server.py prompts.py ./
+COPY bot.py server.py prompts.py working_pipeline.py ./
 
 EXPOSE 7860
 EXPOSE 7862
