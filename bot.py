@@ -5,6 +5,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from loguru import logger
 import psycopg2
+import time
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import LLMRunFrame
@@ -29,165 +30,9 @@ from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
 
 from prompts import base_system_prompt
 
-# Call contexts directory (keeping for backward compatibility)
-CALL_CONTEXTS_DIR = Path("./call_contexts")
-CALL_CONTEXTS_DIR.mkdir(exist_ok=True)
 
-# Helper function to load call context from PostgreSQL database
-def load_call_context_db(call_sid: str) -> dict:
-    """Load call context from PostgreSQL database."""
-    try:
-        conn = psycopg2.connect(
-            host=os.getenv("DB_HOST"),
-            port=os.getenv("DB_PORT", "5432"),
-            database=os.getenv("DB_NAME"),
-            user=os.getenv("DB_USER"),
-            password=os.getenv("DB_PASSWORD")
-        )
-        
-        cursor = conn.cursor()
-        
-        # Fetch call context
-        query = """
-        SELECT call_sid, phone_number, app_name, reason, language, client_name
-        FROM call_contexts
-        WHERE call_sid = %s AND is_active = TRUE;
-        """
-        
-        cursor.execute(query, (call_sid,))
-        result = cursor.fetchone()
-        
-        cursor.close()
-        conn.close()
-        
-        if result:
-            context = {
-                "call_sid": result[0],
-                "phone_number": result[1],
-                "app_name": result[2],
-                "reason": result[3],
-                "language": result[4],
-                "client_name": result[5],
-            }
-            logger.info(f"✅ Loaded call context for {call_sid} from database")
-            return context
-        else:
-            logger.warning(f"⚠️  Call context not found for {call_sid}")
-            return {}
-    except Exception as e:
-        logger.error(f"❌ Failed to load call context from database: {e}")
-        return {}
 
-def delete_call_context_db(call_sid: str) -> bool:
-    """Mark call context as inactive (soft delete) in PostgreSQL."""
-    try:
-        conn = psycopg2.connect(
-            host=os.getenv("DB_HOST"),
-            port=os.getenv("DB_PORT", "5432"),
-            database=os.getenv("DB_NAME"),
-            user=os.getenv("DB_USER"),
-            password=os.getenv("DB_PASSWORD")
-        )
-        
-        cursor = conn.cursor()
-        
-        # Soft delete by marking as inactive
-        query = """
-        UPDATE call_contexts
-        SET is_active = FALSE, updated_at = CURRENT_TIMESTAMP
-        WHERE call_sid = %s;
-        """
-        
-        cursor.execute(query, (call_sid,))
-        conn.commit()
-        cursor.close()
-        conn.close()
-        
-        logger.info(f"✅ Marked call context as inactive for {call_sid}")
-        return True
-    except Exception as e:
-        logger.error(f"❌ Failed to mark call context as inactive: {e}")
-        return False
-
-# -----------------------------------------------------------------------------
-# ENV
-# -----------------------------------------------------------------------------
-load_dotenv(override=True)
-
-# -----------------------------------------------------------------------------
-# SERVICE INITIALIZATION
-# -----------------------------------------------------------------------------
-
-def _create_services():
-    """Create fresh service instances for each call."""
-    logger.info("🚀 Creating fresh AI services for this call")
-
-    services = {
-        "stt": OpenAISTTService(api_key=os.getenv("OPENAI_API_KEY")),
-        "llm": OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY")),
-        "tts": ElevenLabsTTSService(
-            api_key=os.getenv("ELEVENLABS_API_KEY"),
-            voice_id=os.getenv("ELEVENLABS_VOICE_ID"),
-        ),
-    }
-
-    logger.info("✅ Fresh AI services created")
-    return services
-
-# -----------------------------------------------------------------------------
-# BOT ENTRYPOINT
-# -----------------------------------------------------------------------------
-async def bot(runner_args: RunnerArguments):
-    """
-    Main bot function for handling incoming calls.
-    
-    Args:
-        runner_args: WebSocket runner arguments
-        call_contexts_dict: Dictionary of all call contexts keyed by call_sid
-    """
-    
-    
-    transport_type, call_data = await parse_telephony_websocket(
-        runner_args.websocket
-    )
-
-    logger.info(f"🔌 Transport detected: {transport_type}")
-    
-    call_id = call_data.get("call_id")
-    print(f"Call ID #########################>>>>: {call_id}")
-    
-    # Load call context from PostgreSQL database (for multi-worker support)
-    call_context = load_call_context_db(call_id)
-    print("database context:", call_context)
-    
-    # Fallback to in-memory dict if database context not found
-    if not call_context and call_id:
-        logger.warning(f"⚠️  No context found in database for call_id {call_id}, using defaults")
-        print(f"Call context is empty, using defaults")
-
-    serializer = ExotelFrameSerializer(
-        stream_sid=call_data["stream_id"],
-        call_sid=call_data["call_id"],
-    )
-
-    transport = FastAPIWebsocketTransport(
-        websocket=runner_args.websocket,
-        params=FastAPIWebsocketParams(
-            audio_in_enabled=True,
-            audio_out_enabled=True,
-            add_wav_header=False,
-            vad_analyzer=SileroVADAnalyzer(),
-            serializer=serializer,
-        ),
-    )
-
-    # Create fresh service instances for this specific call
-    services = _create_services()
-    stt = services["stt"]
-    llm = services["llm"]
-    tts = services["tts"]
-    
-    greeting_text_dict = {
+greeting_text_dict = {
     # 🇮🇳 Indian languages
     "hindi": "नमस्ते {client_name}! मैं Priya बोल रही हूँ {app_name} से। क्या अभी बात करना convenient है?",
     "bengali": "নমস্কার {client_name}! আমি Priya বলছি {app_name} থেকে। এখন কথা বলা কি সুবিধাজনক?",
@@ -261,6 +106,170 @@ async def bot(runner_args: RunnerArguments):
     "hebrew": "שלום {client_name}! מדברת פריה מ־{app_name}. האם זה זמן נוח לדבר?"
 }
 
+def get_db_conn():
+    return psycopg2.connect(
+        host=os.getenv("DB_HOST"),
+        port=os.getenv("DB_PORT", "5432"),
+        database=os.getenv("DB_NAME"),
+        user=os.getenv("DB_USER"),
+        password=os.getenv("DB_PASSWORD")
+    )
+# Helper function to load call context from PostgreSQL database
+def load_call_context_db(call_sid: str) -> dict:
+    """Load call context from PostgreSQL database."""
+    try:
+        
+        conn = get_db_conn()
+        cursor = conn.cursor()
+        
+        # Fetch call context
+        query = """
+        SELECT call_sid, phone_number, app_name, reason, language, client_name
+        FROM call_contexts
+        WHERE call_sid = %s AND is_active = TRUE;
+        """
+        
+        cursor.execute(query, (call_sid,))
+        result = cursor.fetchone()
+        
+        cursor.close()
+        conn.close()
+        
+        if result:
+            context = {
+                "call_sid": result[0],
+                "phone_number": result[1],
+                "app_name": result[2],
+                "reason": result[3],
+                "language": result[4],
+                "client_name": result[5],
+            }
+            logger.info(f"✅ Loaded call context for {call_sid} from database")
+            return context
+        else:
+            logger.warning(f"⚠️  Call context not found for {call_sid}")
+            return {}
+    except Exception as e:
+        logger.error(f"❌ Failed to load call context from database: {e}")
+        return {}
+
+# -----------------------------------------------------------------------------
+# ENV
+# -----------------------------------------------------------------------------
+load_dotenv(override=True)
+
+# -----------------------------------------------------------------------------
+# SERVICE INITIALIZATION
+# -----------------------------------------------------------------------------
+
+# def _create_services():
+#     """Create fresh service instances for each call."""
+#     logger.info("🚀 Creating fresh AI services for this call")
+
+#     services = {
+#         "stt": OpenAISTTService(api_key=os.getenv("OPENAI_API_KEY")),
+#         # "llm": OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY")),
+
+#         "llm": OpenAILLMService(
+#                 api_key=os.getenv("OPENAI_API_KEY"),
+#                 stream=True,          # 🔥 critical
+#                 temperature=0.4,
+#             ),
+#         "tts": ElevenLabsTTSService(
+#             api_key=os.getenv("ELEVENLABS_API_KEY"),
+#             voice_id=os.getenv("ELEVENLABS_VOICE_ID"),
+#         ),
+#     }
+
+#     logger.info("✅ Fresh AI services created")
+#     return services
+
+# -----------------------------------------------------------------------------
+# GLOBAL SERVICE CLIENTS (REUSED)
+# -----------------------------------------------------------------------------
+
+GLOBAL_STT = OpenAISTTService(
+    api_key=os.getenv("OPENAI_API_KEY"),
+)
+
+GLOBAL_LLM = OpenAILLMService(
+    api_key=os.getenv("OPENAI_API_KEY"),
+    stream=True,
+    temperature=0.4,
+)
+
+GLOBAL_TTS = ElevenLabsTTSService(
+    api_key=os.getenv("ELEVENLABS_API_KEY"),
+    voice_id=os.getenv("ELEVENLABS_VOICE_ID"),
+)
+
+
+# -----------------------------------------------------------------------------
+# BOT ENTRYPOINT
+# -----------------------------------------------------------------------------
+async def bot(runner_args: RunnerArguments):
+    """
+    Main bot function for handling incoming calls.
+    
+    Args:
+        runner_args: WebSocket runner arguments
+        call_contexts_dict: Dictionary of all call contexts keyed by call_sid
+    """
+    
+    
+    transport_type, call_data = await parse_telephony_websocket(
+        runner_args.websocket
+    )
+
+    logger.info(f"🔌 Transport detected: {transport_type}")
+    
+    call_id = call_data.get("call_id")
+    print(f"Call ID #########################>>>>: {call_id}")
+    
+    # Load call context from PostgreSQL database (for multi-worker support)
+    print("Loading call context from database...")
+    call_context = load_call_context_db(call_id)
+    print("Initial database called")
+    # if not call_context:
+    #     time.sleep(2)  # wait for 2 seconds before retrying
+    #     call_context = load_call_context_db(call_id)
+    
+    print("database context:", call_context)
+    
+    # Fallback to in-memory dict if database context not found
+    # if not call_context and call_id:
+    #     logger.warning(f"⚠️  No context found in database for call_id {call_id}, using defaults")
+    #     print(f"Call context is empty, using defaults")
+
+    serializer = ExotelFrameSerializer(
+        stream_sid=call_data["stream_id"],
+        call_sid=call_data["call_id"],
+    )
+
+    transport = FastAPIWebsocketTransport(
+        websocket=runner_args.websocket,
+        params=FastAPIWebsocketParams(
+            audio_in_enabled=True,
+            audio_out_enabled=True,
+            add_wav_header=False,
+            vad_analyzer=SileroVADAnalyzer(),
+            serializer=serializer,
+        ),
+    )
+
+    # Create fresh service instances for this specific call
+    # services = _create_services()
+    # stt = services["stt"]
+    # llm = services["llm"]
+    # tts = services["tts"]
+
+    stt = GLOBAL_STT
+    llm = GLOBAL_LLM
+    tts = GLOBAL_TTS
+
+    
+    
+
     lang = call_context.get("language", "")
     if lang not in greeting_text_dict.keys():
         lang = "hindi"  # default to hindi if language not recognized
@@ -285,7 +294,6 @@ async def bot(runner_args: RunnerArguments):
 
     context = LLMContext(messages)
     context_aggregator = LLMContextAggregatorPair(context)
-    print(context_aggregator)
     pipeline = Pipeline(
         [
             transport.input(),
@@ -303,8 +311,8 @@ async def bot(runner_args: RunnerArguments):
         params=PipelineParams(
             audio_in_sample_rate=8000,
             audio_out_sample_rate=8000,
-            enable_metrics=True,
-            enable_usage_metrics=True,
+            enable_metrics=False,
+            enable_usage_metrics=False  ,
         ),
     )
 
@@ -343,6 +351,33 @@ async def bot(runner_args: RunnerArguments):
                 
             except Exception as e:
                 logger.error(f"❌ Error generating greeting: {e}")
+    # @task.event_handler("on_pipeline_started")
+    # async def on_pipeline_started(task, event):
+    #     nonlocal greeting_given
+
+    #     if greeting_given:
+    #         return
+
+    #     greeting_given = True
+    #     logger.info("🎤 Scheduling greeting (non-blocking)")
+
+    #     async def play_greeting():
+    #         try:
+    #             async for frame in tts.run_tts(text=greeting_text):
+    #                 await transport.output().push_frame(frame)
+
+    #             context.messages.append({
+    #                 "role": "assistant",
+    #                 "content": greeting_text
+    #             })
+
+    #             logger.info("✅ Greeting completed")
+
+    #         except Exception as e:
+    #             logger.error(f"❌ Greeting error: {e}")
+
+    #     # 🚀 THIS IS THE KEY LINE
+    #     asyncio.create_task(play_greeting())
 
     
 
@@ -352,5 +387,4 @@ async def bot(runner_args: RunnerArguments):
         await runner.run(task)
         
     finally:
-        delete_call_context_db(call_id)  # Mark call context as inactive after call ends
         pass
