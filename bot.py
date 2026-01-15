@@ -156,8 +156,7 @@ async def bot(runner_args):
         enable_usage_metrics=False,
     ),
     idle_timeout_secs=None,           # disables idle detection
-    cancel_on_idle_timeout=False,     # optional, doesn't matter here
-)
+    cancel_on_idle_timeout=False,)
     # -------------------------------------------------------------------------
     # GREETING (AFTER USER SPEAKS 🔊)
     # -------------------------------------------------------------------------
