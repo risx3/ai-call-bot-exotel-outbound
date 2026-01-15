@@ -79,6 +79,20 @@ def load_call_context_db(call_sid: str) -> dict:
     except Exception as e:
         logger.error(f"DB load error: {e}")
         return {}
+    
+async def load_call_context_async(call_sid: str) -> dict:
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, load_call_context_db, call_sid)
+
+    
+async def wait_for_call_context(call_sid: str, retries: int = 10, delay: float = 0.2) -> dict:
+    for _ in range(retries):
+        ctx = load_call_context_db(call_sid)
+        if ctx:
+            return ctx
+        await asyncio.sleep(delay)
+    logger.warning(f"⚠️ Call context not found for {call_sid}, continuing with defaults")
+    return {}
 
 # -----------------------------------------------------------------------------
 # BOT
@@ -93,7 +107,7 @@ async def bot(runner_args):
 
     logger.info(f"📞 Call started: {call_sid}")
 
-    call_context = load_call_context_db(call_sid)
+    call_context = await wait_for_call_context(call_sid)
 
     serializer = ExotelFrameSerializer(
         stream_sid=call_data["stream_id"],
@@ -135,14 +149,17 @@ async def bot(runner_args):
     context = LLMContext([{"role": "system", "content": system_prompt}])
     aggregator = LLMContextAggregatorPair(context)
 
+    transport_input = transport.input()
+    transport_output = transport.output()
+
     pipeline = Pipeline(
         [
-            transport.input(),
+            transport_input,
             GLOBAL_STT,
             aggregator.user(),
             GLOBAL_LLM,
             tts,
-            transport.output(),
+            transport_output,
             aggregator.assistant(),
         ]
     )
@@ -177,7 +194,7 @@ async def bot(runner_args):
                 async for frame in tts.run_tts(text=greeting_text):
                     logger.info("✅ Greeting audio frame generated, pushing to transport")
                     # Push each audio frame to the transport output
-                    await transport.output().push_frame(frame)
+                    await transport_output.push_frame(frame)
                 
                 # Add greeting to conversation context so LLM knows bot already greeted
                 context.messages.append({
@@ -190,9 +207,14 @@ async def bot(runner_args):
             except Exception as e:
                 logger.error(f"❌ Error generating greeting: {e}")
    
-
+    # -------------------------------------------------------------------------
     runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
-    await runner.run(task)
+
+    try:
+        await runner.run(task)
+    except Exception as e:
+        logger.exception(f"Runner errored for call {call_sid}: {e}")
+    
         
     
 
