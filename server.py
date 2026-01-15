@@ -124,6 +124,15 @@ async def initiate_outbound_call(request: Request):
     data = await request.json()
     settings = data.get("dialout_settings", {})
 
+    required_fields = ["app_name", "reason", "language", "client_name", "phone_number"]
+    missing = [f for f in required_fields if not settings.get(f)]
+
+    if missing:
+        raise HTTPException(
+            400,
+            f"Missing required dialout_settings fields: {missing}"
+        )
+
     phone_number = settings.get("phone_number")
     if not phone_number:
         raise HTTPException(400, "dialout_settings.phone_number is required")
@@ -203,5 +212,5 @@ if __name__ == "__main__":
         "server:app",
         host="0.0.0.0",
         port=7862,
-        workers=min(2, multiprocessing.cpu_count()),
+        workers=min(4, multiprocessing.cpu_count()),
     )
